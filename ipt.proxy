@@ -102,10 +102,10 @@ $IPT -A INPUT -i ${PROXY_IF} -p tcp --destination-port 137:139 -j ACCEPT
 $IPT -A INPUT -i ${PROXY_IF} -p udp --destination-port 137:139 -j ACCEPT
 
 # Accept proxy connections from local network
-$IPT -A INPUT -i ${PROXY_IF} -s 192.168.1.0/24 -p tcp --dport 3128 -j ACCEPT
+$IPT -A INPUT -i ${PROXY_IF} -s 192.168.0.0/24 -p tcp --dport 3128 -j ACCEPT
 
-# Allow access internet VIP hosts
-$IPT -t nat -A POSTROUTING -o ${PUB_IF} -s 192.168.5.14/32 -j MASQUERADE	#wi-fi Network
+# Allow access to another users
+$IPT -t nat -A POSTROUTING -o ${PUB_IF} -s 192.168.1.1/32 -j MASQUERADE	#wi-fi Network
 #
 # Save settings
 #
