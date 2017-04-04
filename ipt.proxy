@@ -1,0 +1,116 @@
+#!/bin/bash
+#
+# iptables configuration script
+#
+
+IPT="/sbin/iptables"
+PUB_IF="eth0"
+PROXY_IF="eth1"
+BLOCKEDIPS="/root/firewall/blocked.ips.txt"
+SPAMLIST="blockedip"
+EXT_IP="put here you external ipadress"
+UNIVERSE="0/0"
+
+#
+# Flush all current rules from iptables
+#
+$IPT -F
+#
+# Allow SSH connections on tcp port 22
+# This is essential when working on remote servers via SSH to prevent locking yourself out of the system
+#
+$IPT -A INPUT -p tcp --dport 22 -j ACCEPT
+#
+# Set default policies for INPUT, FORWARD and OUTPUT chains
+#
+$IPT -P INPUT DROP
+$IPT -P OUTPUT ACCEPT
+#
+# Set access for localhost
+#
+$IPT -A INPUT -i lo -j ACCEPT
+#
+# Accept packets belonging to established and related connections
+#
+$IPT -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+
+$IPT -t nat -F
+$IPT -t nat -X
+$IPT -t mangle -F
+$IPT -t mangle -X
+$IPT -X $SPAMLIST
+
+# enable ip forwarding
+echo 1 > /proc/sys/net/ipv4/ip_forward
+
+# load modules
+/sbin/modprobe ip_conntrack
+
+[ -f "$BLOCKEDIPS" ] && BADIPS=$(egrep -v -E "^#|^$" "${BLOCKEDIPS}")
+
+# interface connected to the Internet
+
+#Unlimited traffic for loopback
+$IPT -A INPUT -i lo -j ACCEPT
+$IPT -A OUTPUT -o lo -j ACCEPT
+
+# DROP all incomming traffic
+$IPT -P INPUT DROP
+$IPT -P OUTPUT ACCEPT
+$IPT -P FORWARD ACCEPT
+
+# Allow http / https (open port 80 / 443)
+$IPT -A INPUT -i ${PUB_IF} -p tcp --destination-port 80 -j ACCEPT
+$IPT -A INPUT -i ${PUB_IF} -p tcp --destination-port 443 -j ACCEPT
+
+$IPT -A INPUT -i ${PROXY_IF} -p tcp --destination-port 80 -j ACCEPT
+$IPT -A INPUT -i ${PROXY_IF} -p tcp --destination-port 443 -j ACCEPT
+
+# Open port 8080 (jboss web-service) / 9999
+# $IPT -A INPUT -i ${PUB_IF} -p tcp --destination-port 8080 -j ACCEPT
+# $IPT -A INPUT -i ${PUB_IF} -p tcp --destination-port 9999 -j ACCEPT
+
+# Open port 3306 (mysql-server)
+# $IPT -A INPUT -i ${PUB_IF} -p tcp --destination-port 3306 -j ACCEPT
+# $IPT -A INPUT -i ${PUB_IF} -p udp --destination-port 3306 -j ACCEPT
+   
+# allow incomming ICMP ping pong stuff
+$IPT -A INPUT -p icmp --icmp-type 8 -m state --state NEW,ESTABLISHED,RELATED -j ACCEPT
+#$IPT -A OUTPUT -o ${PUB_IF} -p icmp --icmp-type 0 -m state --state ESTABLISHED,RELATED -j ACCEPT
+    
+# Allow port 53 tcp/udp (DNS Server)
+$IPT -A INPUT -p udp --dport 53 -m state --state NEW,ESTABLISHED,RELATED -j ACCEPT
+$IPT -A OUTPUT -o ${PUB_IF} -p udp --sport 53 -m state --state ESTABLISHED,RELATED -j ACCEPT
+     
+$IPT -A INPUT -p tcp --destination-port 53 -m state --state NEW,ESTABLISHED,RELATED  -j ACCEPT
+$IPT -A OUTPUT -o ${PUB_IF} -p tcp --sport 53 -m state --state ESTABLISHED,RELATED -j ACCEPT
+
+# Open port 110 (pop3) / 143
+#$IPT -A INPUT -i ${PUB_IF} -p tcp --destination-port 110 -j ACCEPT
+#$IPT -A INPUT -i ${PUB_IF} -p tcp --destination-port 143 -j ACCEPT
+
+#Open port 21 (vsftpd)
+$IPT -A INPUT -i ${PUB_IF} -p tcp --destination-port 21 -j ACCEPT
+$IPT -A INPUT -i ${PUB_IF} -p udp --destination-port 21 -j ACCEPT
+$IPT -A INPUT -i ${PUB_IF} -p tcp --destination-port 20 -j ACCEPT
+$IPT -A INPUT -i ${PUB_IF} -p udp --destination-port 20 -j ACCEPT
+
+# Open port 137:139 (samba)
+$IPT -A INPUT -i ${PUB_IF} -p tcp --destination-port 137:139 -j ACCEPT
+$IPT -A INPUT -i ${PUB_IF} -p udp --destination-port 137:139 -j ACCEPT
+$IPT -A INPUT -i ${PROXY_IF} -p tcp --destination-port 137:139 -j ACCEPT
+$IPT -A INPUT -i ${PROXY_IF} -p udp --destination-port 137:139 -j ACCEPT
+
+# Accept proxy connections from local network
+$IPT -A INPUT -i ${PROXY_IF} -s 192.168.1.0/24 -p tcp --dport 3128 -j ACCEPT
+
+# Allow access internet VIP hosts
+$IPT -t nat -A POSTROUTING -o ${PUB_IF} -s 192.168.5.14/32 -j MASQUERADE	#wi-fi Network
+#
+# Save settings
+#
+# $IPT save
+#
+# List rules
+#
+$IPT -L -v
