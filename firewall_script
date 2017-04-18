@@ -1,0 +1,99 @@
+﻿#!/bin/bash
+# Тут в принципе может и не надо этого всего но не помеха
+# вдруг какой модуль не подгружен или форвардинг не включен
+echo "1" > /proc/sys/net/ipv4/ip_forward
+echo "1" > /proc/sys/net/ipv4/ip_dynaddr
+modprobe iptable_nat
+modprobe ip_conntrack_ftp
+modprobe ip_nat_ftp
+
+# Объявление переменных
+export IPT="iptables"
+
+# Интерфейс который смотрит в интернет
+export WAN=ppp0
+
+# Локальная сеть
+export LAN=eth1
+export LAN_IP_RANGE=192.168.0.0/24
+
+# Очистка всех цепочек iptables
+$IPT -F
+$IPT -F -t nat
+$IPT -F -t mangle
+$IPT -X
+$IPT -t nat -X
+$IPT -t mangle -X
+
+# Закрываем изначально ВСЁ (т.е. изначально все что не разрешено - запрещено):
+$IPT -P INPUT DROP
+$IPT -P OUTPUT DROP
+$IPT -P FORWARD DROP
+
+# разрешаем локальный траффик для loopback и внутренней сети
+$IPT -A INPUT -i lo -j ACCEPT
+$IPT -A INPUT -i $LAN -j ACCEPT
+$IPT -A OUTPUT -o lo -j ACCEPT
+$IPT -A OUTPUT -o $LAN -j ACCEPT
+
+# Состояние ESTABLISHED говорит о том, что это не первый пакет в соединении.
+# Пропускать все уже инициированные соединения, а также дочерние от них
+$IPT -A INPUT -p all -m state --state ESTABLISHED,RELATED -j ACCEPT
+# Пропускать новые, а так же уже инициированные и их дочерние соединения
+$IPT -A OUTPUT -p all -m state --state NEW,ESTABLISHED,RELATED -j ACCEPT
+# Разрешить форвардинг для новых, а так же уже инициированных
+# и их дочерних соединений
+$IPT -A FORWARD -p all -m state --state NEW,ESTABLISHED,RELATED -j ACCEPT
+
+# Включаем фрагментацию пакетов. Необходимо из за разных значений MTU
+$IPT -I FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
+
+# Отбрасывать все пакеты, которые не могут быть идентифицированы
+# и поэтому не могут иметь определенного статуса.
+$IPT -A INPUT -m state --state INVALID -j DROP
+$IPT -A FORWARD -m state --state INVALID -j DROP
+
+# Приводит к связыванию системных ресурсов, так что реальный
+# обмен данными становится не возможным.
+$IPT -A INPUT -p tcp ! --syn -m state --state NEW -j DROP
+$IPT -A OUTPUT -p tcp ! --syn -m state --state NEW -j DROP
+
+# Разрешаем доступ из внутренней сети наружу
+$IPT -A FORWARD -i $LAN -o $WAN -j ACCEPT
+
+# Запрещаем доступ снаружи во внутреннюю сеть
+$IPT -A FORWARD -i $WAN -o $LAN -j REJECT
+
+# Маскарадинг
+$IPT -t nat -A POSTROUTING -o $WAN -s $LAN_IP_RANGE -j MASQUERADE
+
+
+# Далее дано как пример открытие портов извне:
+# **********************************************************************
+# Открываем порт для ssh
+$IPT -A INPUT -i $WAN -p tcp --dport 22 -j ACCEPT
+
+# Открытие портов для торрентов (такие же указать в torrent-клиенте)
+$IPT -A INPUT -i $WAN -p tcp -m multiport --ports 49152:65535 -j ACCEPT
+
+# Открытие 443 порта
+$IPT -A INPUT -p tcp --dport 443 -j ACCEPT
+
+# Открываем 80 порт для веб сайтов
+$IPT -A INPUT -i $WAN -p tcp --dport 80 -j ACCEPT
+$IPT -A INPUT -i $WAN -p udp --dport 80 -j ACCEPT
+
+# Открытие портов для игровых серверов
+$IPT -A INPUT -i $WAN -p tcp --dport 27010:27030 -j ACCEPT
+$IPT -A INPUT -i $WAN -p udp --dport 27010:27030 -j ACCEPT
+
+# Открытие порта для голосового сервера Team Speak
+$IPT -A INPUT -i $WAN -p tcp --dport 9987 -j ACCEPT
+$IPT -A INPUT -i $WAN -p udp --dport 9987 -j ACCEPT
+# **********************************************************************
+ 
+# Вывод информации о состоянии таблиц.
+route -n
+$IPT -L
+$IPT -L -v -n
+$IPT -L -v -n -t nat
